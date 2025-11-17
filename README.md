@@ -117,7 +117,82 @@ Biasanya melalui raphQL Gateway** atau API Orchestrator.
 
 ![alt text](image.png)
 ## 3.⁠ ⁠Dengan menggunakan Docker / Docker Compose, buatlah streaming replication di PostgreSQL yang bisa menjelaskan sinkronisasi. Tulislah langkah-langkah pengerjaannya dan buat penjelasan secukupnya.
-```
+# Streaming Replication PostgreSQL dengan Docker Compose
 
+Dokumen ini menjelaskan cara membuat **streaming replication** sederhana di PostgreSQL menggunakan Docker dan Docker Compose. Replikasi ini bekerja dengan menyalin *Write-Ahead Log (WAL)* dari primary ke replica secara terus-menerus. Hasilnya, data di replica selalu mengikuti primary.
 
-```
+---
+
+## 1. Gambaran Streaming Replication
+
+PostgreSQL mencatat semua perubahan data ke file bernama WAL. Dalam streaming replication, WAL tersebut dikirim dari *primary* ke *replica*. Replica membaca WAL dan menerapkannya, sehingga datanya selalu sinkron.
+
+---
+
+## 2. Struktur Docker Compose
+
+Kita akan menjalankan dua kontainer:
+
+- **postgres-primary** — server utama  
+- **postgres-replica** — server salinan (standby)  
+
+Masing-masing memakai volume terpisah agar datanya persisten.
+
+---
+
+## 3. File `docker-compose.yml`
+
+Berikut contoh file untuk membuat replikasi:
+
+```yaml
+version: '3.8'
+
+services:
+  postgres-primary:
+    image: postgres:15
+    container_name: postgres-primary
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: adminpass
+      POSTGRES_DB: mydb
+    volumes:
+      - primary-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "wal_keep_size=64"
+      - "-c"
+      - "hot_standby=off"
+
+  postgres-replica:
+    image: postgres:15
+    container_name: postgres-replica
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: adminpass
+    depends_on:
+      - postgres-primary
+    volumes:
+      - replica-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    command:
+      - "bash"
+      - "-c"
+      - |
+        rm -rf /var/lib/postgresql/data/*
+        PGPASSWORD=adminpass pg_basebackup -h postgres-primary -U admin -D /var/lib/postgresql/data -Fp -Xs -P -R
+        echo "primary_conninfo='host=postgres-primary port=5432 user=admin password=adminpass'" >> /var/lib/postgresql/data/postgresql.auto.conf
+        exec postgres
+
+volumes:
+  primary-data:
+  replica-data:
