@@ -117,7 +117,7 @@ Biasanya melalui raphQL Gateway** atau API Orchestrator.
 
 ![alt text](image.png)
 ## 3.⁠ ⁠Dengan menggunakan Docker / Docker Compose, buatlah streaming replication di PostgreSQL yang bisa menjelaskan sinkronisasi. Tulislah langkah-langkah pengerjaannya dan buat penjelasan secukupnya.
-# Streaming Replication PostgreSQL dengan Docker Compose
+### Streaming Replication PostgreSQL dengan Docker Compose
 
 Dokumen ini menjelaskan cara membuat **streaming replication** sederhana di PostgreSQL menggunakan Docker dan Docker Compose. Replikasi ini bekerja dengan menyalin *Write-Ahead Log (WAL)* dari primary ke replica secara terus-menerus. Hasilnya, data di replica selalu mengikuti primary.
 
@@ -140,59 +140,86 @@ Masing-masing memakai volume terpisah agar datanya persisten.
 
 ---
 
-## 3. File `docker-compose.yml`
+## 3. Struktur Direktori
 
-Berikut contoh file untuk membuat replikasi:
+Berikut contoh Struktur Direktori
+Direktori ini terdiri dari beberapa komponen yang masing-masing memiliki fungsi khusus dalam proses replikasi PostgreSQL:
 
-```yaml
-version: '3.8'
+- ```docker-compose.yml```
+  Berperan sebagai definisi lingkungan Docker. File ini menetapkan dua service: satu untuk server PostgreSQL utama (primary) dan satu lagi untuk server penyalin (replica).
 
-services:
-  postgres-primary:
-    image: postgres:15
-    container_name: postgres-primary
-    restart: always
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: adminpass
-      POSTGRES_DB: mydb
-    volumes:
-      - primary-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    command:
-      - "postgres"
-      - "-c"
-      - "wal_level=replica"
-      - "-c"
-      - "max_wal_senders=10"
-      - "-c"
-      - "wal_keep_size=64"
-      - "-c"
-      - "hot_standby=off"
+- ```primary/init-primary.sql```
+  Sebuah skrip SQL yang dieksekusi otomatis saat database primary pertama kali dibuat. Skrip ini membuat akun khusus yang digunakan untuk proses replikasi.
 
-  postgres-replica:
-    image: postgres:15
-    container_name: postgres-replica
-    restart: always
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: adminpass
-    depends_on:
-      - postgres-primary
-    volumes:
-      - replica-data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
-    command:
-      - "bash"
-      - "-c"
-      - |
-        rm -rf /var/lib/postgresql/data/*
-        PGPASSWORD=adminpass pg_basebackup -h postgres-primary -U admin -D /var/lib/postgresql/data -Fp -Xs -P -R
-        echo "primary_conninfo='host=postgres-primary port=5432 user=admin password=adminpass'" >> /var/lib/postgresql/data/postgresql.auto.conf
-        exec postgres
+- ```primary/init-replication.sh``` 
+  Skrip shell yang dijalankan pada tahap inisialisasi primary. Tugas utamanya adalah mengatur *pg_hba.conf* agar primary menerima koneksi replikasi dari server lain.
 
-volumes:
-  primary-data:
-  replica-data:
+- ```replica/init-replica.sh```
+  Skrip shell yang dipanggil saat inisialisasi awal replica. Skrip ini melakukan tiga pekerjaan penting:  
+  - Menunggu sampai primary siap menerima koneksi.  
+  - Melakukan base backup dari primary ke direktori data milik replica.  
+  - Mengatur konfigurasi standby sehingga replica berjalan sebagai server replikasi.
+
+Seluruh file yang ditempatkan di dalam folder *docker-entrypoint-initdb.d* akan dijalankan secara otomatis oleh image resmi PostgreSQL ketika instans database dibuat pertama kali.
+
+## 4.⁠ ⁠Penjelasan Konfigurasi
+
+Primary
+```
+wal_level=replica
+```
+Mengaktifkan WAL untuk replikasi.
+
+```
+max_wal_senders=10
+```
+Batas proses pengirim WAL.
+```
+wal_keep_size=64
+```
+Menjaga WAL tetap tersedia agar replica tidak ketinggalan.
+
+
+Replica
+
+Menghapus data lama agar proses pg_basebackup berjalan bersih.
+```
+pg_basebackup menyalin seluruh data dari primary.
+```
+Opsi -R membuat file standby.signal untuk mode replica.
+```
+primary_conninfo berisi detail koneksi primary.
+```
+
+
+---
+
+## 5.⁠ ⁠Menjalankan Replikasi
+
+Jalankan:
+```
+docker compose up -d
+```
+Tes replikasi:
+```
+docker exec -it postgres-primary psql -U admin -c "CREATE TABLE test(x int);"
+docker exec -it postgres-replica psql -U admin -c "\dt"
+```
+Jika tabel muncul, replikasi bekerja.
+
+
+---
+
+## 6.⁠ ⁠Mengecek Status Replikasi
+
+Mengecek Primary
+```
+SELECT * FROM pg_stat_replication;
+```
+Jika ada baris data, replica sedang terhubung.
+
+Mengecek Replica
+```
+SELECT pg_is_in_recovery();
+```
+Jika hasilnya true, server berada pada mode standby.
