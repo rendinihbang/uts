@@ -223,3 +223,7 @@ Mengecek Replica
 SELECT pg_is_in_recovery();
 ```
 Jika hasilnya true, server berada pada mode standby.
+
+## 7.Kesimpulan
+Berdasarkan pembahasan di atas, dapat disimpulkan bahwa pembangunan sistem terdistribusi PostgreSQL streaming replication menggunakan Docker Compose merupakan implementasi praktis dari teori CAP dan BASE, di mana sistem ini memilih Availability dan Partition Tolerance (AP) dengan mengorbankan Consistency sementara melalui replikasi asinkron, sehingga data di replica akan mencapai konsistensi secara eventual (eventual consistency) meskipun terjadi keterlambatan sinkronisasi, sementara GraphQL berperan sebagai interface API yang memudahkan query data terdistribusi dari client side tanpa terlibat langsung dalam mekanisme IPC antar service.
+
